@@ -57,7 +57,7 @@ protected:
     void disconnectDevice();
 
 public slots:
-    void debugInput(QByteArray bytes);
+    void debugInput(QByteArray bytes) override;
 
 private slots:
     void connectDevice();

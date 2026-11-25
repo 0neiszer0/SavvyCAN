@@ -18,25 +18,22 @@ jobs:
         with:
            version: '6.10'
            modules: 'qtserialbus qtserialport'
+           cache: true
 
       - name: Clone
         uses: actions/checkout@v4
-
-      - name: Prepare libusb
-        shell: cmd
-        run: '"%VCPKG_INSTALLATION_ROOT%\vcpkg" install libusb:x64-windows'
 
       - name: Compile
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          cmake -B ${{github.workspace}}/build -S ${{github.workspace}} -DCMAKE_BUILD_TYPE=Release -DLIBUSB_INCLUDE_DIR="%VCPKG_INSTALLATION_ROOT%/installed/x64-windows/include/libusb-1.0" -DLIBUSB_LIBRARY="%VCPKG_INSTALLATION_ROOT%/installed/x64-windows/lib/libusb-1.0.lib"
-          cmake --build ${{github.workspace}}/build --config Release -j 4
+          cmake -G Ninja -B ${{github.workspace}}/build -S ${{github.workspace}} -DCMAKE_BUILD_TYPE=Release -DUSE_LIBUSB=OFF
+          cmake --build ${{github.workspace}}/build --parallel
 
       - name: Package
         run: |
           mkdir package
-          copy "build/Release/SavvyCAN.exe" package/
+          if (Test-Path "build/SavvyCAN.exe") { copy "build/SavvyCAN.exe" package/ } else { copy "build/Release/SavvyCAN.exe" package/ }
           & "${Env:QT_ROOT_DIR}/bin/windeployqt.exe" --release --no-opengl-sw package/SavvyCAN.exe
           mkdir package/help -Force | Out-Null
           mkdir package/translations -Force | Out-Null
@@ -46,7 +43,6 @@ jobs:
           copy help/images/*.* package/help/images/
           mkdir package/examples -Force | Out-Null
           copy examples/*.* package/examples/
-          copy "${Env:VCPKG_INSTALLATION_ROOT}/installed/x64-windows/bin/libusb-1.0.dll" package/
           mkdir package/canbus -Force | Out-Null
           copy "${Env:QT_ROOT_DIR}/plugins/canbus/*.*" package/canbus/
           mkdir package/tls -Force | Out-Null
