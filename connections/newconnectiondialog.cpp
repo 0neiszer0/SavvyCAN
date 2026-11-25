@@ -598,11 +598,13 @@ void NewConnectionDialog::fillBusSpeedLists()
     }
     if (ui->cbDataRate->count() == 0)
     {
+        ui->cbDataRate->addItem("500000");
         ui->cbDataRate->addItem("1000000");
         ui->cbDataRate->addItem("2000000");
         ui->cbDataRate->addItem("4000000");
         ui->cbDataRate->addItem("5000000");
-        ui->cbDataRate->setCurrentText("2000000");
+        ui->cbDataRate->addItem("8000000");
+        ui->cbDataRate->setCurrentText("1000000");
     }
 }
 

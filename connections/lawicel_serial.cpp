@@ -8,8 +8,8 @@
 #include "lawicel_serial.h"
 #include "utility.h"
 
-LAWICELSerial::LAWICELSerial(QString portName, int serialSpeed, int lawicelSpeed, bool canFd, int dataRate) :
-    CANConnection(portName, "LAWICEL", CANCon::LAWICEL,serialSpeed, lawicelSpeed, canFd, dataRate, 3, 4000, true),
+LAWICELSerial::LAWICELSerial(QString portName, int serialSpeed, int lawicelSpeed, bool canFd, int dataRate, bool listenOnly, bool active) :
+    CANConnection(portName, "LAWICEL", CANCon::LAWICEL, serialSpeed, lawicelSpeed, canFd, dataRate, 3, 4000, true, listenOnly, active),
     mTimer(this) /*NB: set this as parent of timer to manage it from working thread */
 {
     sendDebug("LAWICELSerial()");
@@ -108,34 +108,12 @@ void LAWICELSerial::piSetBusSettings(int pBusIdx, CANBus bus)
 
     /* copy bus config */
     setBusConfig(pBusIdx, bus);
-/*
-    qDebug() << "About to update bus " << pBusIdx << " on GVRET";
-    if (pBusIdx == 0)
-    {
-        can0Baud = bus.getSpeed();
-        can0Baud |= 0x80000000;
-        if (bus.isActive())
-        {
-            can0Baud |= 0x40000000;
-            can0Enabled = true;
-        }
-        else can0Enabled = false;
 
-        if (bus.isListenOnly())
-        {
-            can0Baud |= 0x20000000;
-            can0ListenOnly = true;
-        }
-        else can0ListenOnly = false;
+    /* Apply updated bus settings (speed, CAN FD data rate, listen-only / active) immediately to the adapter */
+    if (pBusIdx == 0 && serial != nullptr && serial->isOpen())
+    {
+        applyBusConfigToHardware();
     }
-    if (pBusIdx < 2) {
-        // update baud rates
-        QByteArray buffer;
-        //sendDebug("Got signal to update bauds. 1: " + QString::number((can0Baud & 0xFFFFFFF)));
-        buffer.append((char)0xF1); //start of a command over serial
-        //sendToSerial(buffer);
-    }
-*/
 }
 
 
@@ -146,6 +124,12 @@ bool LAWICELSerial::piSendFrame(const CommFrame& frame)
     if (serial == nullptr) return false;
     if (serial && !serial->isOpen()) return false;
     //if (!isConnected) return false;
+
+    CANBus bus;
+    if (getBusConfig(0, bus) && (!bus.isActive() || bus.isListenOnly())) {
+        sendDebug("LAWICEL: TX blocked (bus inactive or listen-only mode)");
+        return false;
+    }
 
     // Doesn't make sense to send an error frame
     // to an adapter
@@ -264,68 +248,70 @@ void LAWICELSerial::connectDevice()
     }
 }
 
-void LAWICELSerial::deviceConnected()
+void LAWICELSerial::applyBusConfigToHardware()
 {
-    sendDebug("Connecting to LAWICEL Device!");
-
-    rebuildLocalTimeBasis();
-
     QByteArray output;
 
-    output.clear();
-    output.append('C'); //close the bus in case it was already up
+    output.append('C'); //close the bus before changing settings (or keep closed if inactive)
     output.append('\x0D');
     sendToSerial(output);
-
     output.clear();
-    output.append('S'); //configure speed of bus
-        switch (this->mBusData[0].mBus.getSpeed())
-        {
-        case 10000:
-            output.append('0');
-            break;
-        case 20000:
-            output.append('1');
-            break;
-        case 50000:
-            output.append('2');
-            break;
-        case 100000:
-            output.append('3');
-            break;
-        case 125000:
-            output.append('4');
-            break;
-        case 250000:
-            output.append('5');
-            break;
-        case 500000:
-            output.append('6');
-            break;
-        case 800000:
-            output.append('7');
-            break;
-        case 1000000:
-            output.append('8');
-            break;
-        default:
-            output.append('6');
-            break;
-        }
 
+    const CANBus &bus = this->mBusData[0].mBus;
+    if (!bus.isActive())
+    {
+        sendDebug("LAWICEL: Bus disabled (closed)");
+        return;
+    }
+
+    output.append('S'); //configure nominal/arbitration speed of bus
+    switch (bus.getSpeed())
+    {
+    case 10000:
+        output.append('0');
+        break;
+    case 20000:
+        output.append('1');
+        break;
+    case 50000:
+        output.append('2');
+        break;
+    case 100000:
+        output.append('3');
+        break;
+    case 125000:
+        output.append('4');
+        break;
+    case 250000:
+        output.append('5');
+        break;
+    case 500000:
+        output.append('6');
+        break;
+    case 800000:
+        output.append('7');
+        break;
+    case 1000000:
+        output.append('8');
+        break;
+    default:
+        output.append('6');
+        break;
+    }
     output.append('\x0D');
-
     sendToSerial(output);
-
     output.clear();
 
-    //CAN FD mode and data rate come from the bus settings (filled in from the connection dialog). The
-    //canFd/dataRate members this used were never set, so whether Y was sent depended on leftover memory.
-    const bool canFd = mBusData[0].mBus.isCanFD();
-    const int dataRate = mBusData[0].mBus.getDataRate();
-    if (canFd){
+    //CAN FD mode and data rate come from the bus settings (filled in from the connection dialog).
+    const bool canFd = bus.isCanFD();
+    const int dataRate = bus.getDataRate();
+    if (canFd)
+    {
         switch (dataRate)
         {
+        case 500000:
+            output.append("Y0");
+            break;
         case 1000000:
             output.append("Y1");
             break;
@@ -338,22 +324,37 @@ void LAWICELSerial::deviceConnected()
         case 5000000:
             output.append("Y5");
             break;
+        case 8000000:
+            output.append("Y8");
+            break;
         default:
-            //only 1/2/4/5 Mbit/s are mapped to Y codes here
             qWarning() << "LAWICEL: CAN FD data rate" << dataRate << "not supported, using 2 Mbit/s";
             output.append("Y2");
             break;
         }
-
         output.append('\x0D');
         sendToSerial(output);
         output.clear();
     }
 
-    output.append('O'); //open bus now that we set the speed
+    if (bus.isListenOnly())
+    {
+        output.append('L'); //open bus in listen-only (silent) mode
+    }
+    else
+    {
+        output.append('O'); //open bus in normal mode
+    }
     output.append('\x0D');
-
     sendToSerial(output);
+}
+
+void LAWICELSerial::deviceConnected()
+{
+    sendDebug("Connecting to LAWICEL Device!");
+
+    rebuildLocalTimeBasis();
+    applyBusConfigToHardware();
 
     mNumBuses = 1;
     setStatus(CANCon::CONNECTED);
@@ -361,8 +362,6 @@ void LAWICELSerial::deviceConnected()
     stats.conStatus = getStatus();
     stats.numHardwareBuses = mNumBuses;
     mBusData[0].mConfigured = true;
-    mBusData[0].mBus.setActive(true);
-    //mBusData[0].mBus.setSpeed();
     emit status(stats);
 }
 
@@ -495,6 +494,16 @@ void LAWICELSerial::readSerialData()
         unsigned char c = data.at(i);
         //qDebug() << c << "    " << QString::number(c, 16) << "     " << QString(c);
         debugBuild = debugBuild % QString::number(c, 16).rightJustified(2,'0') % " ";
+        if (c == '\x07') // LAWICEL/SLCAN BEL (error) has no trailing CR; clear buffer so the next frame isn't corrupted
+        {
+            sendDebug("LAWICEL: Received BEL (0x07) error from adapter");
+            mBuildLine.clear();
+            continue;
+        }
+        if (c == '\x0A') // ignore stray LF
+        {
+            continue;
+        }
         //procRXChar(c);
         mBuildLine.append(QChar(c));
         if (c == '\x0D') //all lawicel commands end in CR

@@ -93,10 +93,12 @@ ConnectionWindow::ConnectionWindow(QWidget *parent) :
     //ui->cbBusSpeed->addItem("400000");
 
     //CAN FD data phase rates (the list used to be empty apart from the bus's current rate)
+    ui->cbDataRate->addItem("500000");
     ui->cbDataRate->addItem("1000000");
     ui->cbDataRate->addItem("2000000");
     ui->cbDataRate->addItem("4000000");
     ui->cbDataRate->addItem("5000000");
+    ui->cbDataRate->addItem("8000000");
 
     rxBroadcastGVRET = new QUdpSocket(this);
     //Need to make sure it tries to share the address in case there are
@@ -498,7 +500,10 @@ void ConnectionWindow::populateBusDetails(int offset)
             }
         }
 
-        if (!found) ui->cbBusSpeed->addItem(QString::number(bus.getSpeed()));
+        if (!found) {
+            ui->cbBusSpeed->addItem(QString::number(bus.getSpeed()));
+            ui->cbBusSpeed->setCurrentIndex(ui->cbBusSpeed->count() - 1);
+        }
         found = false;
         for (int i = 0; i < ui->cbDataRate->count(); i++)
         {
@@ -509,7 +514,10 @@ void ConnectionWindow::populateBusDetails(int offset)
                 break;
             }
         }
-        if (!found) ui->cbDataRate->addItem(QString::number(bus.getDataRate()));
+        if (!found && bus.getDataRate() > 0) {
+            ui->cbDataRate->addItem(QString::number(bus.getDataRate()));
+            ui->cbDataRate->setCurrentIndex(ui->cbDataRate->count() - 1);
+        }
     }
 }
 

@@ -12,7 +12,7 @@ class LAWICELSerial : public CANConnection
     Q_OBJECT
 
 public:
-    LAWICELSerial(QString portName, int serialSpeed, int lawicelSpeed, bool canFd, int dataRate);
+    LAWICELSerial(QString portName, int serialSpeed, int lawicelSpeed, bool canFd, int dataRate, bool listenOnly = false, bool active = true);
     virtual ~LAWICELSerial();
 
     //key the device label on the USB serial number (not the COM/tty port)
@@ -43,6 +43,7 @@ private slots:
 private:
     void readSettings();
     void rebuildLocalTimeBasis();
+    void applyBusConfigToHardware();
     void sendToSerial(const QByteArray &bytes);
     void sendDebug(const QString debugText);
     uint8_t dlc_code_to_bytes(int dlc_code);

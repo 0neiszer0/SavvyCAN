@@ -1216,6 +1216,13 @@ void FrameSenderWindow::processCellChange(int line, int col)
             tempVal = Utility::ParseStringToNum(ui->tableSender->item(line, SENDTAB_COL_LEN)->text());
             if (tempVal < 0) tempVal = 0;
             if (tempVal > 64) tempVal = 64;
+            if (tempVal > 8 && !rowIsFD(line))
+            {
+                setCheckState(line, ST_COLS::SENDTAB_COL_FD, true);
+                setCheckState(line, ST_COLS::SENDTAB_COL_REM, false);
+                sendingData[line].setFrameType(CommFrame::CANFDDataFrame);
+                sendingData[line].setFlexibleDataRateFormat(true);
+            }
             // Only resize if the current payload is different size
             if (sendingData[line].payload().size() != tempVal)
             {
@@ -1282,6 +1289,13 @@ void FrameSenderWindow::processCellChange(int line, int col)
             for (int j = 0; j < tokens.count() && j < 64; j++)
             {
                 arr.append((uint8_t)Utility::ParseStringToNum(tokens[j]));
+            }
+            if (arr.size() > 8 && !rowIsFD(line))
+            {
+                setCheckState(line, ST_COLS::SENDTAB_COL_FD, true);
+                setCheckState(line, ST_COLS::SENDTAB_COL_REM, false);
+                sendingData[line].setFrameType(CommFrame::CANFDDataFrame);
+                sendingData[line].setFlexibleDataRateFormat(true);
             }
             sendingData[line].setPayload(arr);
             fitPayloadToFrameType(line); //classic: max 8, FD: pad to the next valid FD length; updates Len

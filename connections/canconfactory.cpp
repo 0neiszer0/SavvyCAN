@@ -40,7 +40,7 @@ CANConnection* CanConFactory::create(type pType, QString pPortName, QString pDri
     case REMOTE:
         return new GVRetSerial(pPortName, true);  //it's a special case of GVRET connected over TCP/IP so it uses the same class
     case LAWICEL:
-        return new LAWICELSerial(pPortName, pSerialSpeed, pBusSpeed, pCanFd, pDataRate);
+        return new LAWICELSerial(pPortName, pSerialSpeed, pBusSpeed, pCanFd, pDataRate, pListenOnly, pActive);
     case KAYAK:
         return new SocketCANd(pPortName);
     case MQTT:

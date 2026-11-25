@@ -46,6 +46,12 @@ DetectedDevice DeviceScanner::identifySerial(quint16 vid, quint16 pid,
         d.type = CANCon::LAWICEL; d.confidence = DetectedDevice::Likely; return d;
     }
 
+    // Known CANable / SLCAN USB VID:PIDs (Windows usbser.sys often hides product strings behind generic descriptions)
+    if ((vid == 0x16D0 && pid == 0x117E) || (vid == 0xAD50 && pid == 0x60C4)) {
+        d.displayName = QStringLiteral("CANable SLCAN (%1)").arg(vidpid);
+        d.type = CANCon::LAWICEL; d.confidence = DetectedDevice::Likely; return d;
+    }
+
     // USB vendor hints
     switch (vid) {
     case 0x303A: // Espressif (ESP32-S2/S3 native USB) - almost always an ESP32RET/GVRET build here
