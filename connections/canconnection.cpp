@@ -190,15 +190,18 @@ bool CANConnection::sendFrame(const CommFrame& pFrame)
         return ret;
     }
 
-    CommFrame *txFrame;
-    txFrame = getQueue().get();
-    if (txFrame)
+    const bool sent = piSendFrame(pFrame);
+    if (sent)
     {
-        *txFrame = pFrame;        
-    }    
-    getQueue().queue();
+        CommFrame *txFrame = getQueue().get();
+        if (txFrame)
+        {
+            *txFrame = pFrame;
+        }
+        getQueue().queue();
+    }
 
-    return piSendFrame(pFrame);
+    return sent;
 }
 
 

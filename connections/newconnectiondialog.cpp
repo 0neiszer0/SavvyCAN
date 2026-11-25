@@ -1,6 +1,7 @@
 #include <QCanBus>
 #include <QListWidget>
 #include <QPushButton>
+#include <QCheckBox>
 #include <QGroupBox>
 #include <QLabel>
 #include <QVBoxLayout>
@@ -108,6 +109,12 @@ void NewConnectionDialog::buildDetectPanel()
     ui->verticalLayout->insertWidget(0, box);            //detected group at the very top
     ui->verticalLayout->insertWidget(1, mManualToggle);  //toggle above the manual block
 
+    mCbListenOnly = new QCheckBox(tr("Listen Only (Silent / Safe for live vehicle)"), this);
+    mCbListenOnly->setChecked(false);
+    mCbListenOnly->setVisible(false);
+    const int okIdx = ui->verticalLayout->indexOf(ui->btnOK);
+    ui->verticalLayout->insertWidget(okIdx >= 0 ? okIdx : ui->verticalLayout->count(), mCbListenOnly);
+
     setManualVisible(false); //collapsed by default
     rescanDevices();
 }
@@ -160,8 +167,8 @@ void NewConnectionDialog::applyDetected(const DetectedDevice &d)
     int idx = ui->cbPort->findText(d.portArg);
     if (idx >= 0) ui->cbPort->setCurrentIndex(idx);
     else if (ui->cbPort->isEditable()) ui->cbPort->setCurrentText(d.portArg);
-    //a generic serial chip is only a guess - open manual so the user can confirm/change the protocol
-    if (d.confidence == DetectedDevice::Unknown && mManualToggle && !mManualToggle->isChecked())
+    //a generic serial chip is only a guess, and LAWICEL needs speed/FD/listen-only confirmation
+    if ((d.confidence == DetectedDevice::Unknown || d.type == CANCon::LAWICEL) && mManualToggle && !mManualToggle->isChecked())
         mManualToggle->setChecked(true);
 }
 
@@ -180,7 +187,7 @@ void NewConnectionDialog::onDetectedActivated(QListWidgetItem *item)
     if (i < 0 || i >= mDetected.size()) return;
     const DetectedDevice d = mDetected.at(i);
     applyDetected(d);
-    if (d.confidence != DetectedDevice::Unknown) accept(); //confident match: connect straight away
+    if (d.confidence != DetectedDevice::Unknown && d.type != CANCon::LAWICEL) accept(); //LAWICEL: let user confirm FD & Listen-Only first
 }
 
 //Opt-in: actively probe the selected serial device with the GVRET handshake to confirm it (and whether
@@ -243,6 +250,7 @@ void NewConnectionDialog::handleConnTypeChanged()
     if (ui->rbCANserver->isChecked()) selectCANserver();
     if (ui->rbCanlogserver->isChecked()) selectCANlogserver();
     if (ui->rbPicoFlexRay->isChecked()) selectPicoFlexRay();
+    if (mCbListenOnly) mCbListenOnly->setVisible(hasBusSettings());
 }
 
 void NewConnectionDialog::handleDeviceTypeChanged()
@@ -580,7 +588,7 @@ bool NewConnectionDialog::hasBusSettings()
     return getConnectionType() == CANCon::LAWICEL || getConnectionType() == CANCon::SERIALBUS;
 }
 
-//CAN speed and CAN FD data rate choices shared by LAWICEL and QtSerialBus. Defaults to 500k / 2M.
+//CAN speed and CAN FD data rate choices shared by LAWICEL and QtSerialBus. Defaults to 500k / 1M.
 void NewConnectionDialog::fillBusSpeedLists()
 {
     if (ui->cbCANSpeed->count() == 0)
@@ -656,3 +664,12 @@ bool NewConnectionDialog::isCanFd()
      }
      else return 0;
  }
+
+bool NewConnectionDialog::isListenOnly()
+{
+    if (hasBusSettings() && mCbListenOnly)
+    {
+        return mCbListenOnly->isChecked();
+    }
+    return false;
+}

@@ -17,6 +17,7 @@ class NewConnectionDialog;
 class QListWidget;
 class QListWidgetItem;
 class QPushButton;
+class QCheckBox;
 
 class NewConnectionDialog : public QDialog
 {
@@ -33,6 +34,7 @@ public:
     int getBusSpeed();
     bool isCanFd();
     int getDataRate();
+    bool isListenOnly();
 
 public slots:
     void handleConnTypeChanged();
@@ -50,6 +52,7 @@ private:
     //available in a collapsible section below it.
     QListWidget *mDetectedList = nullptr;
     QPushButton *mManualToggle = nullptr;
+    QCheckBox *mCbListenOnly = nullptr;
     QList<QWidget*> mManualWidgets;      //the original manual controls, collapsed by default
     QList<DetectedDevice> mDetected;     //backing data for the list rows
     void buildDetectPanel();             //adds the detected-devices group + manual toggle

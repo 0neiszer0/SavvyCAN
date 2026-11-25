@@ -16,6 +16,7 @@ LAWICELSerial::LAWICELSerial(QString portName, int serialSpeed, int lawicelSpeed
 
     serial = nullptr;
     //isAutoRestart = false;
+    mBusData[0].mConfigured = true; // preserve initial bus settings (speed, FD, listen-only) even if port open fails
     rebuildLocalTimeBasis();
 
     readSettings();
@@ -126,8 +127,8 @@ bool LAWICELSerial::piSendFrame(const CommFrame& frame)
     //if (!isConnected) return false;
 
     CANBus bus;
-    if (getBusConfig(0, bus) && (!bus.isActive() || bus.isListenOnly())) {
-        sendDebug("LAWICEL: TX blocked (bus inactive or listen-only mode)");
+    if (!getBusConfig(0, bus) || !bus.isActive() || bus.isListenOnly()) {
+        sendDebug("LAWICEL: TX blocked (bus unconfigured, inactive, or listen-only mode)");
         return false;
     }
 
@@ -137,15 +138,53 @@ bool LAWICELSerial::piSendFrame(const CommFrame& frame)
         return true;
     }
 
-    //The command letter (t/T, d/D, b/B) says whether the ID is 11 or 29 bits, so only the ID itself is
+    const bool isFD = frame.hasFlexibleDataRateFormat();
+    if (isFD && !bus.isCanFD()) {
+        sendDebug("LAWICEL: TX blocked (CAN FD frame requested on non-FD bus)");
+        return false;
+    }
+
+    //The command letter (t/T, r/R, d/D, b/B) says whether the ID is 11 or 29 bits, so only the ID itself is
     //printed (setting bit 31 here, as before, printed extended IDs as e.g. 98DA0040).
     quint32 ID = frame.frameId() & (frame.hasExtendedFrameFormat() ? 0x1FFFFFFF : 0x7FF);
+
+    // Handle classic RTR frames (no data bytes on wire)
+    if (!isFD && frame.frameType() == CommFrame::RemoteRequestFrame)
+    {
+        const uint8_t rtrLen = static_cast<uint8_t>(qBound(0, static_cast<int>(frame.payload().length()), 8));
+        QString rtrStr = frame.hasExtendedFrameFormat()
+            ? QString::asprintf("R%08X%X\x0D", ID, rtrLen)
+            : QString::asprintf("r%03X%X\x0D", ID, rtrLen);
+        sendToSerial(rtrStr.toLatin1());
+        return true;
+    }
+
+    // Normalize payload length to valid classic (0..8) or CAN FD (0..8, 12, 16, 20, 24, 32, 48, 64) DLC
+    QByteArray payload = frame.payload();
+    if (!isFD)
+    {
+        if (payload.length() > 8) payload.truncate(8);
+    }
+    else if (payload.length() > 8)
+    {
+        static const int fdSizes[] = {12, 16, 20, 24, 32, 48, 64};
+        if (payload.length() > 64) payload.truncate(64);
+        int targetLen = 64;
+        for (int sz : fdSizes)
+        {
+            if (payload.length() <= sz) { targetLen = sz; break; }
+        }
+        if (payload.length() < targetLen)
+        {
+            payload.append(QByteArray(targetLen - payload.length(), '\0'));
+        }
+    }
 
     int idx = 0;
     QString buildStr;
     //The DLC is one hex character, 0-F. FD lengths over 8 use codes 9-F, which %u printed as "10".."15".
-    uint8_t dlcByte = LAWICELSerial::bytes_to_dlc_code(frame.payload().length());
-    if(frame.hasFlexibleDataRateFormat()){
+    uint8_t dlcByte = LAWICELSerial::bytes_to_dlc_code(static_cast<uint8_t>(payload.length()));
+    if (isFD) {
         if (frame.hasExtendedFrameFormat())
         {
             if (frame.hasBitrateSwitch())
@@ -169,7 +208,7 @@ bool LAWICELSerial::piSendFrame(const CommFrame& frame)
     }
 
     QByteArray buffer;
-    int sizeneed = buildStr.length() + (frame.payload().length()*2) +1;
+    int sizeneed = buildStr.length() + (payload.length() * 2) + 1;
     buffer.resize(sizeneed);
     foreach (QChar chr, buildStr)
     {
@@ -177,13 +216,13 @@ bool LAWICELSerial::piSendFrame(const CommFrame& frame)
         idx++;
     }
 
-    for (qsizetype c = 0; c < frame.payload().length(); c++)
+    for (qsizetype c = 0; c < payload.length(); c++)
     {
-        QString byt = Utility::formatByteAsHex(frame.payload()[c]);
+        QString byt = Utility::formatByteAsHex(payload[c]);
         buffer[idx + (c * 2)] = byt[0].toLatin1();
         buffer[idx + (c * 2) + 1] = byt[1].toLatin1();
     }
-    buffer[idx + (frame.payload().length() * 2)] = '\x0D'; //CR
+    buffer[idx + (payload.length() * 2)] = '\x0D'; //CR
 
     sendToSerial(buffer);
 
@@ -232,18 +271,20 @@ void LAWICELSerial::connectDevice()
 
     /* configure */
     serial->setBaudRate(mSerialSpeed);
-    serial->setDataBits(serial->Data8);
-
-    serial->setFlowControl(serial->HardwareControl);
-    //serial->setFlowControl(serial->NoFlowControl);
+    serial->setDataBits(QSerialPort::Data8);
+    serial->setParity(QSerialPort::NoParity);
+    serial->setStopBits(QSerialPort::OneStop);
+    // USB-CDC SLCAN adapters (STM32G431 CANable / Elmue Slcan 2.5) have no hardware RTS/CTS pins;
+    // HardwareControl can stall writes on Windows usbser.sys, while DTR=true is required for CDC replies.
+    serial->setFlowControl(QSerialPort::NoFlowControl);
     if (!serial->open(QIODevice::ReadWrite))
     {
-        //sendDebug("Error returned during port opening: " + serial->errorString());
+        sendDebug("Error returned during port opening: " + serial->errorString());
     }
     else
     {
-        //serial->setDataTerminalReady(true); //Seemingly these two lines used to be needed
-        //serial->setRequestToSend(true);     //But, really both ends should automatically handle these
+        serial->setDataTerminalReady(true);
+        serial->setRequestToSend(false);
         deviceConnected();
     }
 }
@@ -295,8 +336,8 @@ void LAWICELSerial::applyBusConfigToHardware()
         output.append('8');
         break;
     default:
-        output.append('6');
-        break;
+        sendDebug(QStringLiteral("LAWICEL: Unsupported nominal bitrate %1 bps - refusing to open bus").arg(bus.getSpeed()));
+        return;
     }
     output.append('\x0D');
     sendToSerial(output);
@@ -328,9 +369,8 @@ void LAWICELSerial::applyBusConfigToHardware()
             output.append("Y8");
             break;
         default:
-            qWarning() << "LAWICEL: CAN FD data rate" << dataRate << "not supported, using 2 Mbit/s";
-            output.append("Y2");
-            break;
+            sendDebug(QStringLiteral("LAWICEL: Unsupported CAN FD data rate %1 bps - refusing to open bus").arg(dataRate));
+            return;
         }
         output.append('\x0D');
         sendToSerial(output);

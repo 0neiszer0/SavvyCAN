@@ -292,6 +292,7 @@ void ConnectionWindow::handleNewConn()
         newBusSpeed = thisDialog->getBusSpeed();
         newCanFd=thisDialog->isCanFd();
         newDataRate = thisDialog->getDataRate();
+        newListenOnly = thisDialog->isListenOnly();
 
         /* For SerialBus connections the dialog has no speed picker; restore last used settings */
         if (newType == CANCon::SERIALBUS) {
@@ -302,7 +303,8 @@ void ConnectionWindow::handleNewConn()
                 newCanFd = cfg.value("Main/LastSerialBusCanFd", false).toBool();
             if (newDataRate == 0)
                 newDataRate = cfg.value("Main/LastSerialBusDataRate", 0).toInt();
-            newListenOnly = cfg.value("Main/LastSerialBusListenOnly", false).toBool();
+            if (!newListenOnly)
+                newListenOnly = cfg.value("Main/LastSerialBusListenOnly", false).toBool();
             newActive = cfg.value("Main/LastSerialBusActive", true).toBool();
         }
 
@@ -610,6 +612,7 @@ CANConnection* ConnectionWindow::create(CANCon::type pTye, QString pPortName, QS
         {            
             //set up the debug console to operate if we've selected it. Doing so here allows debugging right away during set up
             connect(conn_p, &CANConnection::debugOutput, this, &ConnectionWindow::getDebugText, Qt::UniqueConnection);
+            connect(this, &ConnectionWindow::sendDebugData, conn_p, &CANConnection::debugInput, Qt::UniqueConnection);
         }
         /*TODO add return value and checks */
         conn_p->start();
